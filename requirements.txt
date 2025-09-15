@@ -1,0 +1,9 @@
+streamlit
+pymupdf
+pillow
+pytesseract
+faiss-cpu
+sentence-transformers
+groq
+tenacity
+rich
