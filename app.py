@@ -59,7 +59,7 @@ def search(query, k=5):
     return [corpus[i] for i in I[0]]
 
 # Jenny LLM client
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY")  # set this in Streamlit Cloud secrets
+GROQ_API_KEY = os.environ.get("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")  # set this in Streamlit Cloud secrets
 client = Groq(api_key=GROQ_API_KEY)
 
 PRIMARY_MODEL = "llama-3.3-70b-versatile"
