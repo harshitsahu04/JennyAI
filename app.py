@@ -1,69 +1,79 @@
-import os, io, zipfile, glob, re, json, requests
 import streamlit as st
+import os, io, re, zipfile, glob, requests, json
 from dataclasses import dataclass
 from typing import List, Tuple, Optional
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-import fitz
-import yaml
 from pptx import Presentation
 from pptx.util import Pt, Inches
 from pptx.dml.color import RGBColor
 from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font
 from docx import Document
-import getpass
+from docx.shared import Pt as DOCXPt
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 # ==============================
-# Directories
 # ==============================
-DATA_DIR   = os.environ.get("DATA_DIR", "jenny_pdfs")    # PDFs
-INDEX_DIR  = os.environ.get("INDEX_DIR", "jenny_index")  # Indices
-YAML_DIR   = os.environ.get("YAML_DIR", "JENNY_YAML")   # YAMLs
+# --- PREMIUM CSS (BCG-style) ---
+# ==============================
+st.markdown("""
+<style>
+.stApp {background-color: #F5F5F2; color: #1A1A1A; font-family: 'Helvetica Neue', sans-serif;}
+.hero {background: linear-gradient(120deg, #0A2342, #1C335D); border-radius:12px; padding:30px; margin-bottom:30px; text-align:center; color:#FFD700; box-shadow:0 6px 20px rgba(0,0,0,0.12);}
+.hero h1 {font-size:2.6em; margin-bottom:8px; color:#CBCBD4; font-weight:800; letter-spacing:1px;}
+.hero p {font-size:1.1em; color:#FFD700; font-weight:500; margin-top:0;}
+h1 {color:#0A2342; font-weight:700; text-align:center; font-size:2.4em; border-bottom:3px solid #D4AF37; padding-bottom:10px; margin-bottom:25px;}
+h3 {color:#5A5F6C; text-align:center; margin-top:-10px; margin-bottom:40px; font-weight:400;}
+label {color:#0A2342 !important; opacity:1 !important; font-weight:700; font-size:16px; margin-bottom:6px; display:block; position:relative; padding-left:12px;}
+label:before {content:""; position:absolute; left:0; top:50%; transform:translateY(-50%); width:4px; height:16px; background-color:#D4AF37; border-radius:2px;}
+.stTextArea textarea {font-family:"Georgia", serif; background-color:#FFF; border:1px solid #D4AF37; border-radius:12px; font-size:15px; padding:14px; color:#0A2342; caret-color:#D4AF37; box-shadow:0 2px 6px rgba(0,0,0,0.08);}
+.stTextArea textarea:focus {border-color:#B8860B; box-shadow:0 0 10px rgba(212,175,55,0.25);}
+div.stButton > button:first-child {background:linear-gradient(135deg,#1C335D,#0A2342); color:#FFD700; border-radius:12px; font-weight:700; font-size:16px; padding:14px 32px; box-shadow:0 4px 14px rgba(0,0,0,0.1); display:block; margin:0 auto; margin-top:20px; transition: all 0.3s ease;}
+div.stButton > button:first-child:hover {background:linear-gradient(135deg,#0A2342,#1C335D); transform:translateY(-2px); box-shadow:0 6px 18px rgba(0,0,0,0.15);}
+.response-box {background:linear-gradient(90deg,#FFFDF7,#F7F5EE); border-left:6px solid #D4AF37; padding:28px; border-radius:12px; margin-top:30px; font-size:15px; color:#0A2342; box-shadow:0 6px 20px rgba(0,0,0,0.1);}
+.export-title {font-size:18px; font-weight:600; color:#0A2342; margin-top:35px; margin-bottom:10px; text-align:center;}
+.stAlert {background-color:#FFEAEA !important; border:1px solid #E0B4B4 !important; border-radius:8px;}
+.stAlert p, .stAlert span {color:#5A2E2E !important; font-weight:500;}
+</style>
+""", unsafe_allow_html=True)
 
-os.makedirs(DATA_DIR, exist_ok=True)
-os.makedirs(INDEX_DIR, exist_ok=True)
-os.makedirs(YAML_DIR, exist_ok=True)
+# ==============================
+# --- HEADER ---
+# ==============================
+st.markdown('<div class="hero"><h1>JENNY</h1><p>Your Elite Strategy Partner</p></div>', unsafe_allow_html=True)
 
 # ==============================
-# Load Groq API Key
+# --- INPUTS ---
 # ==============================
-if "GROQ_API_KEY" not in os.environ:
-    os.environ["GROQ_API_KEY"] = getpass.getpass("Paste your Groq API key (hidden): ").strip()
+problem = st.text_area("Problem Statement", height=120)
+context = st.text_area("Client Context", height=120)
 
 # ==============================
-# Corpus backend
+# --- CORPUS & TF-IDF ---
 # ==============================
+PDF_DIR = "./pdfs"  # change to your PDF folder
+os.makedirs(PDF_DIR, exist_ok=True)
+
 @dataclass
 class CorpusIndex:
     docs: List[str]
     vectorizer: Optional[TfidfVectorizer]
     matrix: Optional[np.ndarray]
-    sources: List[Tuple[str, int]]  # (filename, chunk_id)
+    sources: List[Tuple[str, int]]
 
-def extract_text_from_pdf(DATA_DIR: str) -> str:
+def extract_text_from_pdf(file_path: str) -> str:
+    import fitz
     parts = []
     try:
-        with fitz.open(DATA_DIR) as doc:
-            for page in doc:
-                parts.append(page.get_text("text") or "")
-    except Exception as e:
-        print(f"⚠️ PDF read error for {DATA_DIR}: {e}")
+        with fitz.open(file_path) as doc:
+            for page in doc: parts.append(page.get_text("text") or "")
+    except: return ""
     return "\n".join(parts)
-
-def extract_text_from_yaml(YAML_DIR: str) -> str:
-    try:
-        with open(YAML_DIR, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f)
-        return json.dumps(data, indent=2)  # Convert YAML to text
-    except Exception as e:
-        print(f"⚠️ YAML read error for {YAML_DIR}: {e}")
-        return ""
 
 def chunk_text(text: str, max_chars: int = 1800, overlap: int = 220) -> List[str]:
     text = re.sub(r"\s+", " ", text or "").strip()
-    if not text:
-        return []
     chunks, i = [], 0
     while i < len(text):
         end = min(i + max_chars, len(text))
@@ -71,177 +81,83 @@ def chunk_text(text: str, max_chars: int = 1800, overlap: int = 220) -> List[str
         i = end - overlap if end - overlap > i else end
     return chunks
 
-def build_index(DATA_DIR: str, yaml_dir: str) -> CorpusIndex:
+def build_index(pdf_dir: str) -> CorpusIndex:
+    pdf_paths = sorted(glob.glob(os.path.join(pdf_dir, "**/*.pdf"), recursive=True))
     all_chunks, sources = [], []
-
-    # PDFs
-    pdf_paths = sorted(glob.glob(os.path.join(DATA_DIR, "*.pdf")))
     for p in pdf_paths:
         raw = extract_text_from_pdf(p)
-        chs = chunk_text(raw)
-        base = os.path.basename(p)
-        for idx, ch in enumerate(chs):
+        for idx, ch in enumerate(chunk_text(raw)):
             all_chunks.append(ch)
-            sources.append((base, idx))
-
-    # YAMLs
-    yaml_paths = sorted(glob.glob(os.path.join(YAML_DIR, "*.yaml")) + glob.glob(os.path.join(YAML_DIR, "*.yml")))
-    for y in yaml_paths:
-        raw = extract_text_from_yaml(y)
-        chs = chunk_text(raw)
-        base = os.path.basename(y)
-        for idx, ch in enumerate(chs):
-            all_chunks.append(ch)
-            sources.append((base, idx))
-
+            sources.append((os.path.basename(p), idx))
     if not all_chunks:
         all_chunks, sources = ["(No docs indexed)"], [("—", 0)]
     vec = TfidfVectorizer(min_df=1, max_df=0.95)
     mat = vec.fit_transform(all_chunks)
-    print(f"✅ Indexed {len(all_chunks)} chunks from {len(set(b for b,_ in sources))} files.")
     return CorpusIndex(all_chunks, vec, mat, sources)
 
 def retrieve(corpus: CorpusIndex, query: str, k: int = 5):
-    if corpus is None or corpus.vectorizer is None or corpus.matrix is None:
-        return []
-    qv = corpus.vectorizer.transform([query])
-    sims = cosine_similarity(qv, corpus.matrix).ravel()
+    if not corpus.vectorizer or not corpus.matrix: return []
+    sims = cosine_similarity(corpus.vectorizer.transform([query]), corpus.matrix).ravel()
     topk = sims.argsort()[::-1][:k]
     return [(corpus.docs[i], sims[i]) for i in topk]
 
+corpus = build_index(PDF_DIR)
+
 # ==============================
-# Groq backend
+# --- GROQ REST HELPER ---
 # ==============================
-GROQ_BASE = "https://api.groq.com/openai/v1"
-GROQ_API_URL = f"{GROQ_BASE}/chat/completions"
-GROQ_MODELS_URL = f"{GROQ_BASE}/models"
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY","").strip()
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
-SYSTEM_PROMPT = (
-    "You are Jenny, a senior strategy consultant. STRICTLY business/strategy only. "
-    "Answer in crisp MECE style with **bold section headings** (~300–400 words per section)."
-)
+SYSTEM_PROMPT = "You are Jenny, a senior strategy consultant. STRICTLY business/strategy only."
 
-BUSINESS_KEYWORDS = [
-    "strategy","market","pricing","cost","profit","revenue","growth","gtm","segment",
-    "competitive","positioning","roi","wacc","valuation","okrs","kpi","unit economics",
-    "capex","opex","churn","retention","forecast","five forces","blue ocean","minto",
-    "scqa","sales","marketing","product","operations","supply chain","finance","saas",
-    "fintech","healthcare","ecommerce","logistics","manufacturing","ai","telecom","energy","ev"
-]
-
-PREFERRED_MODELS = ["llama-3.3-70b-versatile","llama-3.1-8b-instant"]
-
-def _groq_headers():
-    key = os.environ.get("GROQ_API_KEY","").strip()
-    if not key: raise RuntimeError("GROQ_API_KEY not set.")
-    return {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-
-def _groq_list_models(timeout_s: int = 30) -> list[str]:
-    try:
-        r = requests.get(GROQ_MODELS_URL, headers=_groq_headers(), timeout=timeout_s)
-        if r.status_code != 200: return []
-        data = r.json()
-        return [m.get("id") for m in data.get("data", []) if m.get("id")]
-    except: return []
-
-def _pick_model() -> str:
-    available = _groq_list_models()
-    for m in PREFERRED_MODELS:
-        if m in available: return m
-    for m in available:
-        if "llama" in m: return m
-    return "llama-3.1-8b-instant"
-
-def _call_groq(prompt: str, temperature: float = 0.2, max_tokens: int = 3000):
-    model = _pick_model()
+def jenny_answer(question: str, corpus):
+    hits = retrieve(corpus, question, k=5)
+    ctx = "\n".join([h[0] for h in hits])[:2400] if hits else "(no context)"
     payload = {
-        "model": model,
-        "messages": [{"role":"system","content":SYSTEM_PROMPT},{"role":"user","content":prompt}],
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-        "stream": False
+        "model": "llama-3.1-8b-instant",
+        "messages": [
+            {"role":"system","content":SYSTEM_PROMPT},
+            {"role":"user","content": f"{question}\nContext:\n{ctx}"}
+        ],
+        "temperature":0.2,
+        "max_tokens":2000
     }
     try:
-        resp = requests.post(GROQ_API_URL, headers=_groq_headers(), data=json.dumps(payload), timeout=90)
-        if resp.status_code != 200: return None
-        data = resp.json()
-        return (data["choices"][0]["message"]["content"] or "").strip()
-    except: return None
-
-def jenny_answer(question: str, corpus: CorpusIndex):
-    if not any(k in (question or "").lower() for k in BUSINESS_KEYWORDS):
-        return "**Refusal — Non-Business Query**\n- Only business/strategy questions allowed."
-    try:
-        hits = retrieve(corpus, question, k=5) if corpus else []
-        ctx = "\n".join([h[0] for h in hits])[:2400] if hits else "(no context)"
-    except: ctx = "(no context)"
-    user_prompt = f"**Question**: {question}\n**Context**:\n{ctx}"
-    ans = _call_groq(user_prompt)
-    return ans if ans else "(Jenny fallback answer — no response from Groq)"
+        resp = requests.post(GROQ_API_URL, headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type":"application/json"}, data=json.dumps(payload), timeout=60)
+        if resp.status_code == 200: return resp.json()["choices"][0]["message"]["content"]
+    except: pass
+    return "(Jenny could not fetch a live response; fallback used.)"
 
 # ==============================
-# Exports (PPTX, DOCX, XLSX, ZIP)
+# --- EXPORT FUNCTIONS ---
 # ==============================
-def make_pptx(ans: str, q: str) -> bytes:
-    prs = Presentation()
-    blank = prs.slide_layouts[6]
-    NAVY = RGBColor(18,28,48)
-    def add_slide(title, body):
-        s = prs.slides.add_slide(blank)
-        tf = s.shapes.add_textbox(Inches(0.7), Inches(0.6), Inches(8.4), Inches(0.9)).text_frame
-        p = tf.paragraphs[0]; p.text = title; p.font.size = Pt(32); p.font.bold=True; p.font.color.rgb=NAVY
-        bx = s.shapes.add_textbox(Inches(0.7), Inches(2.1), Inches(8.4), Inches(4.8)).text_frame
-        bx.word_wrap=True; bx.clear()
-        for line in [l.strip() for l in body.splitlines() if l.strip()]:
-            para = bx.add_paragraph(); para.text=line; para.font.size=Pt(18)
-    add_slide(f"Jenny — {q}", ans)
-    bio = io.BytesIO(); prs.save(bio); bio.seek(0)
-    return bio.read()
+def make_pptx(ans, q):  # simple 2-slide for demo
+    prs = Presentation(); blank=prs.slide_layouts[6]
+    s=prs.slides.add_slide(blank); s.shapes.add_textbox(Inches(0.7),Inches(0.6),Inches(8),Inches(1)).text_frame.add_paragraph().text=q
+    s=prs.slides.add_slide(blank); s.shapes.add_textbox(Inches(0.7),Inches(0.6),Inches(8),Inches(5)).text_frame.add_paragraph().text=ans
+    bio=io.BytesIO(); prs.save(bio); bio.seek(0); return bio.read()
 
-def make_docx(ans: str, q: str) -> bytes:
-    doc = Document()
-    doc.add_paragraph(f"Jenny — Strategy Memo", style='Title')
-    doc.add_paragraph(q)
-    doc.add_paragraph(ans)
-    bio = io.BytesIO(); doc.save(bio); bio.seek(0)
-    return bio.read()
+def make_docx(ans, q):
+    doc = Document(); doc.add_heading(q,0); doc.add_paragraph(ans)
+    bio=io.BytesIO(); doc.save(bio); bio.seek(0); return bio.read()
 
-def make_excel() -> bytes:
-    wb = Workbook(); ws = wb.active; ws.title="Sample"
-    ws.append(["Metric","Value"]); ws.append(["Example",123])
-    bio=io.BytesIO(); wb.save(bio); bio.seek(0)
-    return bio.read()
+def make_excel():
+    wb = Workbook(); ws=wb.active; ws.title="Demo"; ws.append(["Metric","Value"]); ws.append(["ROI",0.25])
+    bio=io.BytesIO(); wb.save(bio); bio.seek(0); return bio.read()
 
 # ==============================
-# Streamlit UI
+# --- MAIN BUTTON LOGIC ---
 # ==============================
-st.markdown("<h1 style='text-align:center;color:#0A2342'>JENNY</h1>", unsafe_allow_html=True)
-problem = st.text_area("Problem Statement", height=120)
-context = st.text_area("Client Context", height=120)
-
-corpus = build_index(DATA_DIR, YAML_DIR)
-
 if st.button("Ask Jenny"):
-    if problem.strip() and context.strip():
-        with st.spinner("Jenny is thinking..."):
-            answer = jenny_answer(problem, corpus)
-        st.markdown(f"<div style='background:#FFFDF7;border-left:6px solid #D4AF37;padding:20px;border-radius:12px'>{answer}</div>", unsafe_allow_html=True)
+    if not problem.strip(): st.error("Enter Problem Statement"); st.stop()
+    with st.spinner("Jenny is thinking..."):
+        answer = jenny_answer(problem, corpus)
+    st.markdown(f'<div class="response-box">{answer}</div>', unsafe_allow_html=True)
 
-        # EXPORT
-        col1,col2,col3,col4 = st.columns(4)
-        with col1:
-            st.download_button("📊 PPT", data=make_pptx(answer, problem), file_name="jenny.pptx")
-        with col2:
-            st.download_button("📄 DOCX", data=make_docx(answer, problem), file_name="jenny.docx")
-        with col3:
-            st.download_button("📈 XLSX", data=make_excel(), file_name="jenny.xlsx")
-        with col4:
-            zip_buffer = io.BytesIO()
-            with zipfile.ZipFile(zip_buffer, "w") as z:
-                z.writestr("jenny.pptx", make_pptx(answer, problem))
-                z.writestr("jenny.docx", make_docx(answer, problem))
-                z.writestr("jenny.xlsx", make_excel())
-            zip_buffer.seek(0)
-            st.download_button("🗂 ZIP", data=zip_buffer, file_name="jenny_artifacts.zip")
-    else:
-        st.error("❌ Please enter both Problem Statement and Client Context.")
+    st.markdown('<div class="export-title">📤 Export Results</div>', unsafe_allow_html=True)
+    ppt_bytes, doc_bytes, xls_bytes = make_pptx(answer, problem), make_docx(answer, problem), make_excel()
+    col1, col2, col3 = st.columns(3)
+    with col1: st.download_button("📊 PPTX", ppt_bytes, file_name="jenny.pptx")
+    with col2: st.download_button("📄 DOCX", doc_bytes, file_name="jenny.docx")
+    with col3: st.download_button("📈 XLSX", xls_bytes, file_name="jenny.xlsx")
