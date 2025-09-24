@@ -53,7 +53,7 @@ context = st.text_area("Client Context", height=120)
 # ==============================
 # --- CORPUS & TF-IDF ---
 # ==============================
-PDF_DIR = "./pdfs"  # change to your PDF folder
+PDF_DIR = "jenny pdfs"  # change to your PDF folder
 os.makedirs(PDF_DIR, exist_ok=True)
 
 @dataclass
