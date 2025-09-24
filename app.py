@@ -1,168 +1,228 @@
-import os, json, io, faiss
-import fitz, pytesseract
-from PIL import Image
-import numpy as np
-from sentence_transformers import SentenceTransformer
-from groq import Groq
-from tenacity import retry, stop_after_attempt, wait_exponential
+import os, io, zipfile, glob, re, json, requests
 import streamlit as st
+from dataclasses import dataclass
+from typing import List, Tuple, Optional
+import numpy as np
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+import fitz
+import yaml
+from pptx import Presentation
+from pptx.util import Pt, Inches
+from pptx.dml.color import RGBColor
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font
+from docx import Document
+from docx.shared import Pt as DOCXPt
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+import getpass
 
-# =========================
-# 🔹 CONFIG & SETUP
-# =========================
-DATA_DIR = os.environ.get("DATA_DIR", "jenny_pdfs")      # place PDFs here
-INDEX_DIR = os.environ.get("INDEX_DIR", "jenny_index")   # place FAISS index here
+# ==============================
+# Directories
+# ==============================
+DATA_DIR   = os.environ.get("DATA_DIR", "jenny_pdfs")    # PDFs
+INDEX_DIR  = os.environ.get("INDEX_DIR", "jenny_index")  # Indices
+YAML_DIR   = os.environ.get("YAML_DIR", "JENNY_YAML")   # YAMLs
 
-SYSTEM_PROMPT = """
-You are Jenny, a partner-level strategy consultant (McKinsey/BCG/Bain caliber).
-ONLY answer strategy, management, markets, consulting, and business frameworks.
-If the query is outside these topics (like coding, math, chit-chat, or personal),
-reply strictly: "❌ I only provide Partner-level strategy & management insights."
+os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(INDEX_DIR, exist_ok=True)
+os.makedirs(YAML_DIR, exist_ok=True)
 
-Always apply:
-- MECE structuring
-- Hypothesis-driven logic
-- 80/20 prioritization
-- Boardroom clarity
-- Quick math with assumptions
+# ==============================
+# Load Groq API Key
+# ==============================
+if "GROQ_API_KEY" not in os.environ:
+    os.environ["GROQ_API_KEY"] = getpass.getpass("Paste your Groq API key (hidden): ").strip()
 
-Use this output format:
-1. Executive Summary
-2. Client Context
-3. Hypotheses
-4. Key Drivers & Quick Math
-5. Options & Trade-offs
-6. Recommendation
-7. Risks & Mitigations
-8. 90-Day Action Plan
-9. KPIs & Targets
-10. Data Request
-11. Assumptions & Confidence
-"""
+# ==============================
+# Corpus backend
+# ==============================
+@dataclass
+class CorpusIndex:
+    docs: List[str]
+    vectorizer: Optional[TfidfVectorizer]
+    matrix: Optional[np.ndarray]
+    sources: List[Tuple[str, int]]  # (filename, chunk_id)
 
-# =========================
-# 🔹 BACKEND (Embeddings + Search + Jenny)
-# =========================
-# Load embeddings model
-model = SentenceTransformer("all-MiniLM-L6-v2")
-
-# Load FAISS index
-index = faiss.read_index(os.path.join(INDEX_DIR, "index.faiss"))
-corpus = json.load(open(os.path.join(INDEX_DIR, "meta.json")))
-
-def embed_texts(texts):
-    return np.array(model.encode(texts, normalize_embeddings=True), dtype="float32")
-
-def search(query, k=5):
-    q = embed_texts([query])
-    D, I = index.search(q, k)
-    return [corpus[i] for i in I[0]]
-
-# Jenny LLM client
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY")  # set this in Streamlit Cloud secrets
-client = Groq(api_key=GROQ_API_KEY)
-
-PRIMARY_MODEL = "llama-3.3-70b-versatile"
-FALLBACK_MODEL = "llama-3.1-8b-instant"
-
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
-def call_jenny(prompt, model=PRIMARY_MODEL):
+def extract_text_from_pdf(file_path: str) -> str:
+    parts = []
     try:
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.2,
-            max_tokens=1600
-        )
+        with fitz.open(file_path) as doc:
+            for page in doc:
+                parts.append(page.get_text("text") or "")
     except Exception as e:
-        if "decommissioned" in str(e).lower():
-            resp = client.chat.completions.create(
-                model=FALLBACK_MODEL,
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.2,
-                max_tokens=1600
-            )
-        else:
-            raise
-    return resp.choices[0].message.content.strip()
+        print(f"⚠️ PDF read error for {file_path}: {e}")
+    return "\n".join(parts)
 
-def jenny_consult(problem, context="", use_kb=True):
-    kb_text = ""
-    if use_kb:
-        hits = search(problem, k=5)
-        kb_text = "\n\n".join([f"[{h['doc']} | p{h['page']}] {h['text'][:400]}..." for h in hits])
+def chunk_text(text: str, max_chars: int = 1800, overlap: int = 220) -> List[str]:
+    text = re.sub(r"\s+", " ", text or "").strip()
+    if not text:
+        return []
+    chunks, i = [], 0
+    while i < len(text):
+        end = min(i + max_chars, len(text))
+        chunks.append(text[i:end])
+        i = end - overlap if end - overlap > i else end
+    return chunks
 
-    user_prompt = f"""
-== Problem ==
-{problem}
+def build_index(pdf_dir: str) -> CorpusIndex:
+    pdf_paths = sorted(glob.glob(os.path.join(pdf_dir, "*.pdf")))
+    all_chunks, sources = [], []
+    for p in pdf_paths:
+        raw = extract_text_from_pdf(p)
+        chs = chunk_text(raw)
+        base = os.path.basename(p)
+        for idx, ch in enumerate(chs):
+            all_chunks.append(ch)
+            sources.append((base, idx))
+    if not all_chunks:
+        all_chunks, sources = ["(No docs indexed)"], [("—", 0)]
+    vec = TfidfVectorizer(min_df=1, max_df=0.95)
+    mat = vec.fit_transform(all_chunks)
+    print(f"✅ Indexed {len(all_chunks)} chunks from {len(set(b for b,_ in sources))} PDFs.")
+    return CorpusIndex(all_chunks, vec, mat, sources)
 
-== Context ==
-{context or '(none provided)'}
+def retrieve(corpus: CorpusIndex, query: str, k: int = 5):
+    if corpus is None or corpus.vectorizer is None or corpus.matrix is None:
+        return []
+    qv = corpus.vectorizer.transform([query])
+    sims = cosine_similarity(qv, corpus.matrix).ravel()
+    topk = sims.argsort()[::-1][:k]
+    return [(corpus.docs[i], sims[i]) for i in topk]
 
-== Knowledge Base ==
-{kb_text}
-"""
-    return call_jenny(user_prompt)
+# ==============================
+# Groq backend
+# ==============================
+GROQ_BASE = "https://api.groq.com/openai/v1"
+GROQ_API_URL = f"{GROQ_BASE}/chat/completions"
+GROQ_MODELS_URL = f"{GROQ_BASE}/models"
 
-# =========================
-# 🔹 FRONTEND (Streamlit UI)
-# =========================
-st.set_page_config(
-    page_title="Ask Jenny – Strategy Partner",
-    page_icon="💼",
-    layout="centered"
+SYSTEM_PROMPT = (
+    "You are Jenny, a senior strategy consultant. STRICTLY business/strategy only. "
+    "Answer in crisp MECE style with **bold section headings** (~300–400 words per section)."
 )
 
-# --- Custom CSS ---
-st.markdown(
-    """
-    <style>
-        .stApp { background-color: #F5F5F0; color: #0A2342; font-family: "Helvetica Neue", Arial, sans-serif; }
-        h1 { font-family: "Georgia", serif; color: #0A2342; text-align: center; font-weight: 600; }
-        h3 { font-family: "Georgia", serif; color: #5A5A5A; text-align: center; font-weight: 400; }
-        label, .stMarkdown p { color: #0A2342 !important; font-weight: 600; font-size: 15px; }
-        .stTextArea textarea { font-family: "Cookie", cursive, Georgia, serif; background-color: #FFF5EE; border: 1px solid #A7A9AC; border-radius: 8px; font-size: 15px; padding: 12px; color: #0A2342; caret-color: #0A2342; }
-        div.stButton > button { background-color: #2F4156; color: #FFFFFF; border-radius: 6px; border: none; font-weight: 600; font-size: 16px; padding: 10px 24px; transition: background-color 0.3s ease; display: block; margin: 0 auto; font-family: "Georgia", serif; }
-        div.stButton > button:hover { background-color: #000000; color: #ffffff; }
-        .response-box { background-color: #FFFFFF; border-left: 4px solid #87CEEB; padding: 15px 20px; border-radius: 6px; margin-top: 20px; font-size: 15px; color: #0A2342; }
-        .stAlert { background-color: #353839 !important; color: white !important; border-radius: 6px; font-weight: 500; }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+BUSINESS_KEYWORDS = [
+    "strategy","market","pricing","cost","profit","revenue","growth","gtm","segment",
+    "competitive","positioning","roi","wacc","valuation","okrs","kpi","unit economics",
+    "capex","opex","churn","retention","forecast","five forces","blue ocean","minto",
+    "scqa","sales","marketing","product","operations","supply chain","finance","saas",
+    "fintech","healthcare","ecommerce","logistics","manufacturing","ai","telecom","energy","ev"
+]
 
-# --- UI ---
-st.markdown("<h1>Ask Jenny!</h1>", unsafe_allow_html=True)
-st.markdown("<h3>Your Partner-level Strategy Consultant</h3>", unsafe_allow_html=True)
+PREFERRED_MODELS = ["llama-3.3-70b-versatile","llama-3.1-8b-instant"]
 
+def _groq_headers():
+    key = os.environ.get("GROQ_API_KEY","").strip()
+    if not key: raise RuntimeError("GROQ_API_KEY not set.")
+    return {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+
+def _groq_list_models(timeout_s: int = 30) -> list[str]:
+    try:
+        r = requests.get(GROQ_MODELS_URL, headers=_groq_headers(), timeout=timeout_s)
+        if r.status_code != 200: return []
+        data = r.json()
+        return [m.get("id") for m in data.get("data", []) if m.get("id")]
+    except: return []
+
+def _pick_model() -> str:
+    available = _groq_list_models()
+    for m in PREFERRED_MODELS:
+        if m in available: return m
+    for m in available:
+        if "llama" in m: return m
+    return "llama-3.1-8b-instant"
+
+def _call_groq(prompt: str, temperature: float = 0.2, max_tokens: int = 3000):
+    model = _pick_model()
+    payload = {
+        "model": model,
+        "messages": [{"role":"system","content":SYSTEM_PROMPT},{"role":"user","content":prompt}],
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": False
+    }
+    try:
+        resp = requests.post(GROQ_API_URL, headers=_groq_headers(), data=json.dumps(payload), timeout=90)
+        if resp.status_code != 200: return None
+        data = resp.json()
+        return (data["choices"][0]["message"]["content"] or "").strip()
+    except: return None
+
+def jenny_answer(question: str, corpus: CorpusIndex):
+    if not any(k in (question or "").lower() for k in BUSINESS_KEYWORDS):
+        return "**Refusal — Non-Business Query**\n- Only business/strategy questions allowed."
+    try:
+        hits = retrieve(corpus, question, k=5) if corpus else []
+        ctx = "\n".join([h[0] for h in hits])[:2400] if hits else "(no context)"
+    except: ctx = "(no context)"
+    user_prompt = f"**Question**: {question}\n**Context**:\n{ctx}"
+    ans = _call_groq(user_prompt)
+    return ans if ans else "(Jenny fallback answer — no response from Groq)"
+
+# ==============================
+# Exports (PPTX, DOCX, XLSX, ZIP)
+# ==============================
+def make_pptx(ans: str, q: str) -> bytes:
+    prs = Presentation()
+    blank = prs.slide_layouts[6]
+    NAVY = RGBColor(18,28,48); GREY = RGBColor(90,98,110)
+    def add_slide(title, body):
+        s = prs.slides.add_slide(blank)
+        tf = s.shapes.add_textbox(Inches(0.7), Inches(0.6), Inches(8.4), Inches(0.9)).text_frame
+        p = tf.paragraphs[0]; p.text = title; p.font.size = Pt(32); p.font.bold=True; p.font.color.rgb=NAVY
+        bx = s.shapes.add_textbox(Inches(0.7), Inches(2.1), Inches(8.4), Inches(4.8)).text_frame
+        bx.word_wrap=True; bx.clear()
+        for line in [l.strip() for l in body.splitlines() if l.strip()]:
+            para = bx.add_paragraph(); para.text=line; para.font.size=Pt(18)
+    add_slide(f"Jenny — {q}", ans)
+    bio = io.BytesIO(); prs.save(bio); bio.seek(0)
+    return bio.read()
+
+def make_docx(ans: str, q: str) -> bytes:
+    doc = Document()
+    doc.add_paragraph(f"Jenny — Strategy Memo", style='Title')
+    doc.add_paragraph(q)
+    doc.add_paragraph(ans)
+    bio = io.BytesIO(); doc.save(bio); bio.seek(0)
+    return bio.read()
+
+def make_excel() -> bytes:
+    wb = Workbook(); ws = wb.active; ws.title="Sample"
+    ws.append(["Metric","Value"]); ws.append(["Example",123])
+    bio=io.BytesIO(); wb.save(bio); bio.seek(0)
+    return bio.read()
+
+# ==============================
+# Streamlit UI
+# ==============================
+st.markdown("<h1 style='text-align:center;color:#0A2342'>JENNY</h1>", unsafe_allow_html=True)
 problem = st.text_area("Problem Statement", height=120)
 context = st.text_area("Client Context", height=120)
+
+corpus = build_index(DATA_DIR)
 
 if st.button("Ask Jenny"):
     if problem.strip() and context.strip():
         with st.spinner("Jenny is thinking..."):
-            response = jenny_consult(problem, context)
-        st.markdown(
-            f"""
-            <div class="response-box">
-                <b>Jenny’s Strategic Response:</b><br><br>
-                {response}
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+            answer = jenny_answer(problem, corpus)
+        st.markdown(f"<div style='background:#FFFDF7;border-left:6px solid #D4AF37;padding:20px;border-radius:12px'>{answer}</div>", unsafe_allow_html=True)
+
+        # EXPORT
+        col1,col2,col3,col4 = st.columns(4)
+        with col1:
+            st.download_button("📊 PPT", data=make_pptx(answer, problem), file_name="jenny.pptx")
+        with col2:
+            st.download_button("📄 DOCX", data=make_docx(answer, problem), file_name="jenny.docx")
+        with col3:
+            st.download_button("📈 XLSX", data=make_excel(), file_name="jenny.xlsx")
+        with col4:
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w") as z:
+                z.writestr("jenny.pptx", make_pptx(answer, problem))
+                z.writestr("jenny.docx", make_docx(answer, problem))
+                z.writestr("jenny.xlsx", make_excel())
+            zip_buffer.seek(0)
+            st.download_button("🗂 ZIP", data=zip_buffer, file_name="jenny_artifacts.zip")
     else:
-        st.markdown(
-            """
-            <div class="stAlert">
-                ❌ Please enter both the Problem Statement and Client Context before asking Jenny.
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+        st.error("❌ Please enter both Problem Statement and Client Context.")
