@@ -41,23 +41,23 @@ class CorpusIndex:
     matrix: Optional[np.ndarray]
     sources: List[Tuple[str, int]]  # (filename, chunk_id)
 
-def extract_text_from_pdf(file_path: str) -> str:
+def extract_text_from_pdf(DATA_DIR: str) -> str:
     parts = []
     try:
-        with fitz.open(file_path) as doc:
+        with fitz.open(DATA_DIR) as doc:
             for page in doc:
                 parts.append(page.get_text("text") or "")
     except Exception as e:
-        print(f"⚠️ PDF read error for {file_path}: {e}")
+        print(f"⚠️ PDF read error for {DATA_DIR}: {e}")
     return "\n".join(parts)
 
-def extract_text_from_yaml(file_path: str) -> str:
+def extract_text_from_yaml(YAML_DIR: str) -> str:
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(YAML_DIR, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
         return json.dumps(data, indent=2)  # Convert YAML to text
     except Exception as e:
-        print(f"⚠️ YAML read error for {file_path}: {e}")
+        print(f"⚠️ YAML read error for {YAML_DIR}: {e}")
         return ""
 
 def chunk_text(text: str, max_chars: int = 1800, overlap: int = 220) -> List[str]:
@@ -71,11 +71,11 @@ def chunk_text(text: str, max_chars: int = 1800, overlap: int = 220) -> List[str
         i = end - overlap if end - overlap > i else end
     return chunks
 
-def build_index(pdf_dir: str, yaml_dir: str) -> CorpusIndex:
+def build_index(DATA_DIR: str, yaml_dir: str) -> CorpusIndex:
     all_chunks, sources = [], []
 
     # PDFs
-    pdf_paths = sorted(glob.glob(os.path.join(pdf_dir, "*.pdf")))
+    pdf_paths = sorted(glob.glob(os.path.join(DATA_DIR, "*.pdf")))
     for p in pdf_paths:
         raw = extract_text_from_pdf(p)
         chs = chunk_text(raw)
@@ -85,7 +85,7 @@ def build_index(pdf_dir: str, yaml_dir: str) -> CorpusIndex:
             sources.append((base, idx))
 
     # YAMLs
-    yaml_paths = sorted(glob.glob(os.path.join(yaml_dir, "*.yaml")) + glob.glob(os.path.join(yaml_dir, "*.yml")))
+    yaml_paths = sorted(glob.glob(os.path.join(YAML_DIR, "*.yaml")) + glob.glob(os.path.join(YAML_DIR, "*.yml")))
     for y in yaml_paths:
         raw = extract_text_from_yaml(y)
         chs = chunk_text(raw)
