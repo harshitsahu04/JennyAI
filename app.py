@@ -15,7 +15,6 @@ from docx.shared import Pt as DOCXPt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 # ==============================
-# ==============================
 # --- PREMIUM CSS (BCG-style) ---
 # ==============================
 st.markdown("""
@@ -68,8 +67,10 @@ def extract_text_from_pdf(file_path: str) -> str:
     parts = []
     try:
         with fitz.open(file_path) as doc:
-            for page in doc: parts.append(page.get_text("text") or "")
-    except: return ""
+            for page in doc:
+                parts.append(page.get_text("text") or "")
+    except:
+        return ""
     return "\n".join(parts)
 
 def chunk_text(text: str, max_chars: int = 1800, overlap: int = 220) -> List[str]:
@@ -95,18 +96,24 @@ def build_index(pdf_dir: str) -> CorpusIndex:
     mat = vec.fit_transform(all_chunks)
     return CorpusIndex(all_chunks, vec, mat, sources)
 
+# ✅ FIXED RETRIEVE FUNCTION
 def retrieve(corpus: CorpusIndex, query: str, k: int = 5):
-    if not corpus.vectorizer or not corpus.matrix: return []
-    sims = cosine_similarity(corpus.vectorizer.transform([query]), corpus.matrix).ravel()
-    topk = sims.argsort()[::-1][:k]
-    return [(corpus.docs[i], sims[i]) for i in topk]
+    if corpus is None or corpus.vectorizer is None or corpus.matrix is None:
+        return []
+    try:
+        sims = cosine_similarity(corpus.vectorizer.transform([query]), corpus.matrix).ravel()
+        topk = sims.argsort()[::-1][:k]
+        return [(corpus.docs[i], float(sims[i])) for i in topk]
+    except Exception as e:
+        print("⚠️ Error in retrieve:", e)
+        return []
 
 corpus = build_index(PDF_DIR)
 
 # ==============================
 # --- GROQ REST HELPER ---
 # ==============================
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY","").strip()
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 SYSTEM_PROMPT = "You are Jenny, a senior strategy consultant. STRICTLY business/strategy only."
@@ -117,40 +124,67 @@ def jenny_answer(question: str, corpus):
     payload = {
         "model": "llama-3.1-8b-instant",
         "messages": [
-            {"role":"system","content":SYSTEM_PROMPT},
-            {"role":"user","content": f"{question}\nContext:\n{ctx}"}
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": f"{question}\nContext:\n{ctx}"}
         ],
-        "temperature":0.2,
-        "max_tokens":2000
+        "temperature": 0.2,
+        "max_tokens": 2000
     }
     try:
-        resp = requests.post(GROQ_API_URL, headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type":"application/json"}, data=json.dumps(payload), timeout=60)
-        if resp.status_code == 200: return resp.json()["choices"][0]["message"]["content"]
-    except: pass
+        resp = requests.post(
+            GROQ_API_URL,
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+            data=json.dumps(payload),
+            timeout=60
+        )
+        if resp.status_code == 200:
+            return resp.json()["choices"][0]["message"]["content"]
+    except Exception as e:
+        print("⚠️ Groq REST call failed:", e)
     return "(Jenny could not fetch a live response; fallback used.)"
 
 # ==============================
 # --- EXPORT FUNCTIONS ---
 # ==============================
 def make_pptx(ans, q):  # simple 2-slide for demo
-    prs = Presentation(); blank=prs.slide_layouts[6]
-    s=prs.slides.add_slide(blank); s.shapes.add_textbox(Inches(0.7),Inches(0.6),Inches(8),Inches(1)).text_frame.add_paragraph().text=q
-    s=prs.slides.add_slide(blank); s.shapes.add_textbox(Inches(0.7),Inches(0.6),Inches(8),Inches(5)).text_frame.add_paragraph().text=ans
-    bio=io.BytesIO(); prs.save(bio); bio.seek(0); return bio.read()
+    prs = Presentation()
+    blank = prs.slide_layouts[6]
+    s = prs.slides.add_slide(blank)
+    s.shapes.add_textbox(Inches(0.7), Inches(0.6), Inches(8), Inches(1)).text_frame.add_paragraph().text = q
+    s = prs.slides.add_slide(blank)
+    s.shapes.add_textbox(Inches(0.7), Inches(0.6), Inches(8), Inches(5)).text_frame.add_paragraph().text = ans
+    bio = io.BytesIO()
+    prs.save(bio)
+    bio.seek(0)
+    return bio.read()
 
 def make_docx(ans, q):
-    doc = Document(); doc.add_heading(q,0); doc.add_paragraph(ans)
-    bio=io.BytesIO(); doc.save(bio); bio.seek(0); return bio.read()
+    doc = Document()
+    doc.add_heading(q, 0)
+    doc.add_paragraph(ans)
+    bio = io.BytesIO()
+    doc.save(bio)
+    bio.seek(0)
+    return bio.read()
 
 def make_excel():
-    wb = Workbook(); ws=wb.active; ws.title="Demo"; ws.append(["Metric","Value"]); ws.append(["ROI",0.25])
-    bio=io.BytesIO(); wb.save(bio); bio.seek(0); return bio.read()
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Demo"
+    ws.append(["Metric", "Value"])
+    ws.append(["ROI", 0.25])
+    bio = io.BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+    return bio.read()
 
 # ==============================
 # --- MAIN BUTTON LOGIC ---
 # ==============================
 if st.button("Ask Jenny"):
-    if not problem.strip(): st.error("Enter Problem Statement"); st.stop()
+    if not problem.strip():
+        st.error("Enter Problem Statement")
+        st.stop()
     with st.spinner("Jenny is thinking..."):
         answer = jenny_answer(problem, corpus)
     st.markdown(f'<div class="response-box">{answer}</div>', unsafe_allow_html=True)
@@ -158,6 +192,9 @@ if st.button("Ask Jenny"):
     st.markdown('<div class="export-title">📤 Export Results</div>', unsafe_allow_html=True)
     ppt_bytes, doc_bytes, xls_bytes = make_pptx(answer, problem), make_docx(answer, problem), make_excel()
     col1, col2, col3 = st.columns(3)
-    with col1: st.download_button("📊 PPTX", ppt_bytes, file_name="jenny.pptx")
-    with col2: st.download_button("📄 DOCX", doc_bytes, file_name="jenny.docx")
-    with col3: st.download_button("📈 XLSX", xls_bytes, file_name="jenny.xlsx")
+    with col1:
+        st.download_button("📊 PPTX", ppt_bytes, file_name="jenny.pptx")
+    with col2:
+        st.download_button("📄 DOCX", doc_bytes, file_name="jenny.docx")
+    with col3:
+        st.download_button("📈 XLSX", xls_bytes, file_name="jenny.xlsx")
