@@ -11,10 +11,7 @@ from pptx import Presentation
 from pptx.util import Pt, Inches
 from pptx.dml.color import RGBColor
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font
 from docx import Document
-from docx.shared import Pt as DOCXPt
-from docx.enum.text import WD_ALIGN_PARAGRAPH
 import getpass
 
 # ==============================
@@ -54,6 +51,15 @@ def extract_text_from_pdf(file_path: str) -> str:
         print(f"⚠️ PDF read error for {file_path}: {e}")
     return "\n".join(parts)
 
+def extract_text_from_yaml(file_path: str) -> str:
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+        return json.dumps(data, indent=2)  # Convert YAML to text
+    except Exception as e:
+        print(f"⚠️ YAML read error for {file_path}: {e}")
+        return ""
+
 def chunk_text(text: str, max_chars: int = 1800, overlap: int = 220) -> List[str]:
     text = re.sub(r"\s+", " ", text or "").strip()
     if not text:
@@ -65,9 +71,11 @@ def chunk_text(text: str, max_chars: int = 1800, overlap: int = 220) -> List[str
         i = end - overlap if end - overlap > i else end
     return chunks
 
-def build_index(pdf_dir: str) -> CorpusIndex:
-    pdf_paths = sorted(glob.glob(os.path.join(pdf_dir, "*.pdf")))
+def build_index(pdf_dir: str, yaml_dir: str) -> CorpusIndex:
     all_chunks, sources = [], []
+
+    # PDFs
+    pdf_paths = sorted(glob.glob(os.path.join(pdf_dir, "*.pdf")))
     for p in pdf_paths:
         raw = extract_text_from_pdf(p)
         chs = chunk_text(raw)
@@ -75,11 +83,22 @@ def build_index(pdf_dir: str) -> CorpusIndex:
         for idx, ch in enumerate(chs):
             all_chunks.append(ch)
             sources.append((base, idx))
+
+    # YAMLs
+    yaml_paths = sorted(glob.glob(os.path.join(yaml_dir, "*.yaml")) + glob.glob(os.path.join(yaml_dir, "*.yml")))
+    for y in yaml_paths:
+        raw = extract_text_from_yaml(y)
+        chs = chunk_text(raw)
+        base = os.path.basename(y)
+        for idx, ch in enumerate(chs):
+            all_chunks.append(ch)
+            sources.append((base, idx))
+
     if not all_chunks:
         all_chunks, sources = ["(No docs indexed)"], [("—", 0)]
     vec = TfidfVectorizer(min_df=1, max_df=0.95)
     mat = vec.fit_transform(all_chunks)
-    print(f"✅ Indexed {len(all_chunks)} chunks from {len(set(b for b,_ in sources))} PDFs.")
+    print(f"✅ Indexed {len(all_chunks)} chunks from {len(set(b for b,_ in sources))} files.")
     return CorpusIndex(all_chunks, vec, mat, sources)
 
 def retrieve(corpus: CorpusIndex, query: str, k: int = 5):
@@ -166,7 +185,7 @@ def jenny_answer(question: str, corpus: CorpusIndex):
 def make_pptx(ans: str, q: str) -> bytes:
     prs = Presentation()
     blank = prs.slide_layouts[6]
-    NAVY = RGBColor(18,28,48); GREY = RGBColor(90,98,110)
+    NAVY = RGBColor(18,28,48)
     def add_slide(title, body):
         s = prs.slides.add_slide(blank)
         tf = s.shapes.add_textbox(Inches(0.7), Inches(0.6), Inches(8.4), Inches(0.9)).text_frame
@@ -200,7 +219,7 @@ st.markdown("<h1 style='text-align:center;color:#0A2342'>JENNY</h1>", unsafe_all
 problem = st.text_area("Problem Statement", height=120)
 context = st.text_area("Client Context", height=120)
 
-corpus = build_index(DATA_DIR)
+corpus = build_index(DATA_DIR, YAML_DIR)
 
 if st.button("Ask Jenny"):
     if problem.strip() and context.strip():
