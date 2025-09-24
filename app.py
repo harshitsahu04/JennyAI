@@ -11,7 +11,10 @@ from pptx import Presentation
 from pptx.util import Pt, Inches
 from pptx.dml.color import RGBColor
 from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font
 from docx import Document
+from docx.shared import Pt as DOCXPt
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 import getpass
 
 # ==============================
@@ -19,7 +22,7 @@ import getpass
 # ==============================
 DATA_DIR   = os.environ.get("DATA_DIR", "jenny_pdfs")    # PDFs
 INDEX_DIR  = os.environ.get("INDEX_DIR", "jenny_index")  # Indices
-YAML_DIR   = os.environ.get("YAML_DIR", "JENNY_YAML")    # YAMLs
+YAML_DIR   = os.environ.get("YAML_DIR", "JENNY_YAML")   # YAMLs
 
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(INDEX_DIR, exist_ok=True)
@@ -86,20 +89,6 @@ def retrieve(corpus: CorpusIndex, query: str, k: int = 5):
     sims = cosine_similarity(qv, corpus.matrix).ravel()
     topk = sims.argsort()[::-1][:k]
     return [(corpus.docs[i], sims[i]) for i in topk]
-
-# ==============================
-# YAML Loader
-# ==============================
-def load_yaml_files(yaml_dir: str) -> dict:
-    yamls = {}
-    yaml_paths = sorted(glob.glob(os.path.join(yaml_dir, "*.yaml")))
-    for yp in yaml_paths:
-        try:
-            with open(yp, "r") as f:
-                yamls[os.path.basename(yp)] = yaml.safe_load(f)
-        except Exception as e:
-            yamls[os.path.basename(yp)] = f"⚠️ Error: {e}"
-    return yamls
 
 # ==============================
 # Groq backend
@@ -177,7 +166,7 @@ def jenny_answer(question: str, corpus: CorpusIndex):
 def make_pptx(ans: str, q: str) -> bytes:
     prs = Presentation()
     blank = prs.slide_layouts[6]
-    NAVY = RGBColor(18,28,48)
+    NAVY = RGBColor(18,28,48); GREY = RGBColor(90,98,110)
     def add_slide(title, body):
         s = prs.slides.add_slide(blank)
         tf = s.shapes.add_textbox(Inches(0.7), Inches(0.6), Inches(8.4), Inches(0.9)).text_frame
@@ -208,18 +197,6 @@ def make_excel() -> bytes:
 # Streamlit UI
 # ==============================
 st.markdown("<h1 style='text-align:center;color:#0A2342'>JENNY</h1>", unsafe_allow_html=True)
-
-# Sidebar: show YAML files
-st.sidebar.markdown("### YAML Files")
-yamls = load_yaml_files(YAML_DIR)
-if yamls:
-    for name, content in yamls.items():
-        with st.sidebar.expander(f"📄 {name}"):
-            st.json(content)
-else:
-    st.sidebar.info("No YAML files found in JENNY_YAML/")
-
-# Problem & Context
 problem = st.text_area("Problem Statement", height=120)
 context = st.text_area("Client Context", height=120)
 
