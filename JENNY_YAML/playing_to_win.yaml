@@ -1,0 +1,18 @@
+id: playing_to_win
+title: Playing to Win
+authors:
+- A.G. Lafley
+- Roger L. Martin
+edition_year: 2013
+tags:
+- Choices Cascade
+- Where-to-play
+- How-to-win
+modules:
+- id: choices
+  name: Choices Cascade
+  heuristics:
+  - Translate aspiration into explicit where-to-play & how-to-win choices.
+  - Anchor capabilities & management systems to reinforce choices.
+  templates:
+  - Aspiration → Where to Play → How to Win → Capabilities → Systems

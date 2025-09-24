@@ -1,0 +1,17 @@
+id: porter_competitive_strategy
+title: Competitive Strategy
+authors:
+- Michael E. Porter
+edition_year: 1980
+tags:
+- Five Forces
+- Positioning
+- Industry Structure
+modules:
+- id: five_forces
+  name: Porter’s Five Forces Deep-Dive
+  heuristics:
+  - Score each force with evidence (Low/Med/High).
+  - Threat vector → implication → counteraction.
+  templates:
+  - 'For each force: Evidence → Impact → Response'

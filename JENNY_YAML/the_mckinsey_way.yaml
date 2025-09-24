@@ -1,0 +1,30 @@
+id: the_mckinsey_way
+title: The McKinsey Way
+authors:
+- Ethan M. Rasiel
+edition_year: 1999
+tags:
+- MECE
+- Hypothesis-driven
+- Issue trees
+modules:
+- id: hypothesis_driven
+  name: Hypothesis-Driven Problem Solving
+  heuristics:
+  - Start with the answer; backsolve to the data.
+  - Constrain scope with MECE drivers for 80/20 focus.
+  - Define disconfirming tests before analysis starts.
+  checklist:
+  - Decision owner & time horizon clarified
+  - 1-sentence governing hypothesis
+  - 3–5 key tests with data needed & owners
+  templates:
+  - 'SCQA: Situation → Complication → Question → Answer'
+- id: issue_tree
+  name: Issue Trees & Drivers
+  heuristics:
+  - Split into mutually exclusive, collectively exhaustive drivers.
+  - Quantify each branch to prioritize cuts.
+  templates:
+  - Revenue = Price × Volume; Volume = Customers × Frequency × Avg Units
+  - Cost = Fixed + Variable; Variable = Unit Cost × Units

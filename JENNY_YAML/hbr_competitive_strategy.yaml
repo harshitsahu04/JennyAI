@@ -1,0 +1,9 @@
+book: HBR – Competitive Strategy
+modules:
+- id: five_forces
+  name: Porter Five Forces Deep-Dive
+  heuristics:
+  - Score each force (Low/Med/High) with evidence.
+  - Threat vector → implication → counteraction.
+  templates:
+  - 'For each force: Evidence → Impact → Response'

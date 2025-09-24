@@ -1,0 +1,18 @@
+id: blue_ocean
+title: Blue Ocean Strategy
+authors:
+- W. Chan Kim
+- Renée Mauborgne
+edition_year: 2015
+tags:
+- Value Innovation
+- ERRC
+- Strategy Canvas
+modules:
+- id: errc
+  name: ERRC Grid
+  heuristics:
+  - Eliminate non-value features; reduce over-served factors.
+  - Raise critical value drivers; create new demand factors.
+  templates:
+  - 'ERRC: Eliminate | Reduce | Raise | Create'

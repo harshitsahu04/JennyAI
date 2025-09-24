@@ -1,0 +1,17 @@
+id: good_strategy_bad_strategy
+title: Good Strategy / Bad Strategy
+authors:
+- Richard Rumelt
+edition_year: 2011
+tags:
+- Diagnosis
+- Guiding Policy
+- Coherent Actions
+modules:
+- id: kernel
+  name: Strategy Kernel
+  heuristics:
+  - Diagnose the critical challenge (not a list of issues).
+  - Craft a guiding policy; design coherent actions.
+  templates:
+  - Diagnosis → Guiding Policy → Coherent Actions
