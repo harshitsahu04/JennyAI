@@ -82,8 +82,8 @@ def chunk_text(text: str, max_chars: int = 1800, overlap: int = 220) -> List[str
         i = end - overlap if end - overlap > i else end
     return chunks
 
-def build_index(pdf_dir: str) -> CorpusIndex:
-    pdf_paths = sorted(glob.glob(os.path.join(pdf_dir, "**/*.pdf"), recursive=True))
+def build_index(PDF_DIR: str) -> CorpusIndex:
+    pdf_paths = sorted(glob.glob(os.path.join(PDF_DIR, "**/*.pdf"), recursive=True))
     all_chunks, sources = [], []
     for p in pdf_paths:
         raw = extract_text_from_pdf(p)
