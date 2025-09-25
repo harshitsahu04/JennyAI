@@ -62,11 +62,11 @@ class CorpusIndex:
     matrix: Optional[np.ndarray]
     sources: List[Tuple[str, int]]
 
-def extract_text_from_pdf("jenny pdfs/": str) -> str:
+def extract_text_from_pdf(file_path: str) -> str:
     import fitz
     parts = []
     try:
-        with fitz.open("jenny pdfs/") as doc:
+        with fitz.open(file_path) as doc:
             for page in doc:
                 parts.append(page.get_text("text") or "")
     except:
@@ -82,10 +82,10 @@ def chunk_text(text: str, max_chars: int = 1800, overlap: int = 220) -> List[str
         i = end - overlap if end - overlap > i else end
     return chunks
 
-def build_index(PDF_DIR: str) -> CorpusIndex:
-    pdf_path = sorted(glob.glob(os.path.join(PDF_DIR, "**/*.pdf"), recursive=True))
+def build_index(pdf_dir: str) -> CorpusIndex:
+    pdf_paths = sorted(glob.glob(os.path.join(pdf_dir, "**/*.pdf"), recursive=True))
     all_chunks, sources = [], []
-    for p in pdf_path:
+    for p in pdf_paths:
         raw = extract_text_from_pdf(p)
         for idx, ch in enumerate(chunk_text(raw)):
             all_chunks.append(ch)
