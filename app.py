@@ -35,7 +35,7 @@ div.stButton > button:first-child:hover {background:linear-gradient(135deg,#0A23
 .export-title {font-size:18px; font-weight:600; color:#0A2342; margin-top:35px; margin-bottom:10px; text-align:center;}
 .stAlert {background-color:#FFEAEA !important; border:1px solid #E0B4B4 !important; border-radius:8px;}
 .stAlert p, .stAlert span {color:#5A2E2E !important; font-weight:500;}
-div.stDownloadButton > button {color: #FFD700 !important; font-weight: 700; font-size: 15px;}
+div.stDownloadButton > button {color: ##F5F5DC !important; font-weight: 700; font-size: 15px;}
 div.stDownloadButton > button:hover {color: #FFEC8B !important;}
 </style>
 """, unsafe_allow_html=True)
