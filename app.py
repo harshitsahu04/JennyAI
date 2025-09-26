@@ -29,7 +29,7 @@ label {color:#0A2342 !important; opacity:1 !important; font-weight:700; font-siz
 label:before {content:""; position:absolute; left:0; top:50%; transform:translateY(-50%); width:4px; height:16px; background-color:#D4AF37; border-radius:2px;}
 .stTextArea textarea {font-family:"Georgia", serif; background-color:#FFF; border:1px solid #D4AF37; border-radius:12px; font-size:15px; padding:14px; color:#0A2342; caret-color:#D4AF37; box-shadow:0 2px 6px rgba(0,0,0,0.08);}
 .stTextArea textarea:focus {border-color:#B8860B; box-shadow:0 0 10px rgba(212,175,55,0.25);}
-div.stButton > button:first-child {background:linear-gradient(135deg,#0A2342,#0A2342); color:#FFD700; border-radius:12px; font-weight:700; font-size:16px; padding:14px 32px; box-shadow:0 4px 14px rgba(0,0,0,0.1); display:block; margin:0 auto; margin-top:20px; transition: all 0.3s ease;}
+div.stButton > button:first-child {background:linear-gradient(135deg,#0A2342,#0A2342); color:#EAE3C9; border-radius:12px; font-weight:700; font-size:16px; padding:14px 32px; box-shadow:0 4px 14px rgba(0,0,0,0.1); display:block; margin:0 auto; margin-top:20px; transition: all 0.3s ease;}
 div.stButton > button:first-child:hover {background:linear-gradient(135deg,#0A2342,#1C335D); transform:translateY(-2px); box-shadow:0 6px 18px rgba(0,0,0,0.15);}
 .response-box {background:linear-gradient(90deg,#FFFDF7,#F7F5EE); border-left:6px solid #D4AF37; padding:28px; border-radius:12px; margin-top:30px; font-size:15px; color:#0A2342; box-shadow:0 6px 20px rgba(0,0,0,0.1);}
 .export-title {font-size:18px; font-weight:600; color:#0A2342; margin-top:35px; margin-bottom:10px; text-align:center;}
