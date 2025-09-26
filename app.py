@@ -44,7 +44,7 @@ div.stDownloadButton > button {
 
 /* Optional: hover effect for text */
 div.stDownloadButton > button:hover {
-    color: #FFFFFF !important;  /* turn white on hover */
+    color: #36454f !important;  /* turn white on hover */
 }
 
 </style>
